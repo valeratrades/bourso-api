@@ -43,7 +43,7 @@ impl fmt::Debug for Account {
 }
 
 /// A bank transaction
-#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
 pub struct Transaction {
     /// Operation date (YYYY-MM-DD)
     pub date_op: String,

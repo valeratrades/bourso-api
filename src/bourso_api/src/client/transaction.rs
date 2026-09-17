@@ -3,7 +3,7 @@ use crate::constants::BASE_URL;
 
 use super::BoursoWebClient;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, bail, ensure};
 use chrono::NaiveDate;
 use regex::Regex;
 use serde::Serialize;
@@ -104,6 +104,27 @@ impl BoursoWebClient {
 /// Rendered in place of a CSV body when the export filters match no movement.
 const NO_MOVEMENTS_MARKER: &str = "Aucune opération ne correspond";
 
+/// First column of the French-labelled export, used to recognise it.
+const FRENCH_FIRST_COLUMN: &str = "Date Opération";
+
+/// BoursoBank relabelled the export columns with French display names. Those names
+/// cannot serve as keys — `Solde` titles both the movement amount and the running
+/// balance — so the canonical names are recovered by position instead.
+const FRENCH_HEADER: [&str; 12] = [
+    "dateOp",
+    "dateVal",
+    "label",
+    "suggestedLabel",
+    "category",
+    "categoryParent",
+    "amount",
+    "comment",
+    "accountNum",
+    "accountLabel",
+    "accountbalance",
+    "mark",
+];
+
 /// Parse a French-formatted amount string to f64.
 ///
 /// Handles thousands separators (spaces and non-breaking spaces) and
@@ -154,7 +175,37 @@ fn extract_transactions(content: &str) -> Result<Vec<Transaction>> {
         .headers()
         .context("Export has no CSV header")?
         .clone();
-    let column = |name: &str| headers.iter().position(|header| header.trim() == name);
+    let mut names: Vec<String> = headers.iter().map(|header| header.trim().to_string()).collect();
+    if names.first().is_some_and(|first| first == FRENCH_FIRST_COLUMN) {
+        ensure!(
+            names.len() == FRENCH_HEADER.len(),
+            "French export header carries {} columns, expected {}",
+            names.len(),
+            FRENCH_HEADER.len()
+        );
+        names = FRENCH_HEADER.iter().map(|name| name.to_string()).collect();
+    }
+
+    let records = reader
+        .records()
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .context("Failed to parse CSV record")?;
+
+    // Tagging any transaction in the range appends a `tags` field to every row, which the
+    // French header does not name; unaccounted for, it reads `amount` off `comment`.
+    if let Some(width) = records.iter().map(|record| record.len()).max() {
+        if width == names.len() + 1 {
+            names.insert(3, "tags".to_string());
+        }
+        ensure!(
+            names.len() == width,
+            "export header names {} columns but rows carry {}",
+            names.len(),
+            width
+        );
+    }
+
+    let column = |name: &str| names.iter().position(|header| header == name);
 
     let date_op = column("dateOp").context("Export has no `dateOp` column")?;
     let label = column("label").context("Export has no `label` column")?;
@@ -170,10 +221,9 @@ fn extract_transactions(content: &str) -> Result<Vec<Transaction>> {
     let account_label = column("accountLabel");
     let account_balance = column("accountbalance");
 
-    reader
-        .records()
-        .map(|result| {
-            let record = result.context("Failed to parse CSV record")?;
+    records
+        .into_iter()
+        .map(|record| {
             let field = |index: Option<usize>| {
                 index
                     .and_then(|index| record.get(index))
@@ -387,6 +437,27 @@ mod tests {
         assert_eq!(suppliers(&without_tags), suppliers(&with_tags));
     }
 
+    /// The French header titles both the amount and the running balance `Solde`, so a
+    /// name lookup cannot tell them apart — reading the amount off the balance would
+    /// silently rewrite every figure rather than fail.
+    #[test]
+    fn test_extract_transactions_french_header() {
+        let french = extract_transactions(TRANSACTIONS_CSV_FRENCH).unwrap();
+        assert_eq!(french, extract_transactions(TRANSACTIONS_CSV).unwrap());
+        assert_eq!(french[0].amount, 21.81);
+        assert_eq!(french[0].account_balance, 0.05);
+        assert_eq!(french[1].supplier_found, "Cloudflare");
+        assert_eq!(french[2].category, "Alimentation");
+    }
+
+    /// A row wider than the header by anything other than the unnamed `tags` field means
+    /// the export shape moved again; every column past the gap would be read off by one.
+    #[test]
+    fn test_extract_transactions_rejects_unexplained_extra_columns() {
+        let csv = "dateOp;label;amount\n2026-07-24;VIR;21,81;extra;more\n";
+        assert!(extract_transactions(csv).is_err());
+    }
+
     #[test]
     fn test_extract_transactions_rejects_missing_amount_column() {
         let csv = "dateOp;label;comment\n2026-07-24;VIR;\n";
@@ -486,6 +557,14 @@ mod tests {
 
     /// Same rows, but with the `tags` column BoursoBank inserts at index 3.
     pub const TRANSACTIONS_CSV_WITH_TAGS: &str = r#"dateOp;dateVal;label;tags;suggestedLabel;category;categoryParent;amount;comment;accountNum;accountLabel;accountbalance;mark
+2026-07-24;2026-07-24;"VIR INST MARTIROS SHAHBAZYAN";;"Vir Inst Martiros Shahbazyan";"Virements reçus";"Virements reçus";21,81;;00040105299;BoursoBank;0.05;Non
+2026-07-22;2026-07-22;"CARTE 20/07/26 CLOUDFLARE CB*5287";"???";Cloudflare;"Non catégorisé";"Non catégorisé";-3,94;;00040105299;BoursoBank;-21.76;Non
+2026-07-22;2026-07-22;"CARTE 21/07/26 LIDL 4147 CB*5287";;Lidl;Alimentation;"Vie quotidienne";-13,69;;00040105299;BoursoBank;-21.76;Non
+"#;
+
+    /// Same rows again, as BoursoBank serves them since August 2026: French display
+    /// headers, and a `tags` field in every row that the 12-name header never mentions.
+    pub const TRANSACTIONS_CSV_FRENCH: &str = r#""Date Opération";"Date Valeur";Libellé;"Libellé Suggéré";Catégorie;"Catégorie Parente";Solde;Commentaire;"Numéro Compte";"Libellé Compte";Solde;Pointage
 2026-07-24;2026-07-24;"VIR INST MARTIROS SHAHBAZYAN";;"Vir Inst Martiros Shahbazyan";"Virements reçus";"Virements reçus";21,81;;00040105299;BoursoBank;0.05;Non
 2026-07-22;2026-07-22;"CARTE 20/07/26 CLOUDFLARE CB*5287";"???";Cloudflare;"Non catégorisé";"Non catégorisé";-3,94;;00040105299;BoursoBank;-21.76;Non
 2026-07-22;2026-07-22;"CARTE 21/07/26 LIDL 4147 CB*5287";;Lidl;Alimentation;"Vie quotidienne";-13,69;;00040105299;BoursoBank;-21.76;Non
