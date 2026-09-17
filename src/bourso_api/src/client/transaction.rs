@@ -42,18 +42,14 @@ impl BoursoWebClient {
             .text()
             .await?;
 
-        let token = Regex::new(r#"movementSearch\[_token\][^>]*?value="(?P<token>[^"]*)""#)
-            .expect("valid regex")
-            .captures(&form_page)
-            .and_then(|c| c.name("token"))
-            .context("Could not find export form CSRF token")?
-            .as_str()
-            .to_string();
+        let token = extract_export_token(&form_page)?;
 
         let response = self
             .client
             .post(format!("{BASE_URL}/budget/exporter-mouvements"))
+            // Every input the browser submits, whether or not the server checks it today.
             .form(&[
+                ("movementSearch[label]", ""),
                 ("movementSearch[selectedAccounts][]", account_id),
                 ("movementSearch[fromDate]", from_date),
                 ("movementSearch[toDate]", to_date),
@@ -61,8 +57,10 @@ impl BoursoWebClient {
                 ("movementSearch[filtredBy]", "filtredByCategory"),
                 ("movementSearch[category]", ""),
                 ("movementSearch[operationTypes]", ""),
+                ("movementSearch[operationType]", ""),
                 ("movementSearch[myBudgetPage]", "1"),
                 ("movementSearch[_token]", &token),
+                ("movementSearch[submit]", ""),
             ])
             .headers(self.get_headers())
             .send()
@@ -104,8 +102,24 @@ impl BoursoWebClient {
 /// Rendered in place of a CSV body when the export filters match no movement.
 const NO_MOVEMENTS_MARKER: &str = "Aucune opération ne correspond";
 
-/// First column of the French-labelled export, used to recognise it.
-const FRENCH_FIRST_COLUMN: &str = "Date Opération";
+/// Opening tag of the export form, present on the page the export bounces back to.
+const EXPORT_FORM_MARKER: &str = r#"name="movementSearch""#;
+
+/// The French labels, in the order BoursoBank emits them.
+const FRENCH_HEADER_LABELS: [&str; 12] = [
+    "Date Opération",
+    "Date Valeur",
+    "Libellé",
+    "Libellé Suggéré",
+    "Catégorie",
+    "Catégorie Parente",
+    "Solde",
+    "Commentaire",
+    "Numéro Compte",
+    "Libellé Compte",
+    "Solde",
+    "Pointage",
+];
 
 /// BoursoBank relabelled the export columns with French display names. Those names
 /// cannot serve as keys — `Solde` titles both the movement amount and the running
@@ -124,6 +138,21 @@ const FRENCH_HEADER: [&str; 12] = [
     "accountbalance",
     "mark",
 ];
+
+/// Scrape the per-session CSRF token out of the export form page.
+///
+/// The closing quote after `]` keeps this anchored on the attribute name rather than any
+/// input whose name merely starts with it, and an empty token is refused here rather than
+/// two requests later, where the rejection says nothing about its cause.
+fn extract_export_token(page: &str) -> Result<String> {
+    Ok(Regex::new(r#"movementSearch\[_token\]"[^>]*?value="(?P<token>[^"]+)""#)
+        .expect("valid regex")
+        .captures(page)
+        .and_then(|c| c.name("token"))
+        .context("Could not find a non-empty export form CSRF token")?
+        .as_str()
+        .to_string())
+}
 
 /// Parse a French-formatted amount string to f64.
 ///
@@ -153,13 +182,17 @@ fn extract_transactions(content: &str) -> Result<Vec<Transaction>> {
     // Getting a web page where CSV was requested means either "nothing matched the
     // filters" or that we were bounced (expired session, changed export flow). Only
     // the first is an empty result; treating both as one hid a broken export before.
+    //
+    // Upstream reads any page carrying the export form as empty. Demanding the
+    // no-movements notice as well trades false alarms for the one failure we cannot
+    // walk back: the CLI writes its output file unconditionally, so an empty list
+    // overwrites months of history with a bare header. An error is always recoverable.
     if content.starts_with("<!DOCTYPE") || content.starts_with("<html") {
-        if content.contains(NO_MOVEMENTS_MARKER) {
-            return Ok(Vec::new());
-        }
-        bail!(
-            "Export returned an HTML page instead of CSV, and it does not say the filters matched nothing; the session has most likely expired"
+        ensure!(
+            content.contains(EXPORT_FORM_MARKER) && content.contains(NO_MOVEMENTS_MARKER),
+            "Export returned an HTML page instead of CSV, and it is not the export form saying the filters matched nothing; the session has most likely expired"
         );
+        return Ok(Vec::new());
     }
 
     let mut reader = csv::ReaderBuilder::new()
@@ -176,13 +209,22 @@ fn extract_transactions(content: &str) -> Result<Vec<Transaction>> {
         .context("Export has no CSV header")?
         .clone();
     let mut names: Vec<String> = headers.iter().map(|header| header.trim().to_string()).collect();
-    if names.first().is_some_and(|first| first == FRENCH_FIRST_COLUMN) {
+    if names.first().is_some_and(|first| first == FRENCH_HEADER_LABELS[0]) {
         ensure!(
-            names.len() == FRENCH_HEADER.len(),
+            names.len() == FRENCH_HEADER_LABELS.len(),
             "French export header carries {} columns, expected {}",
             names.len(),
-            FRENCH_HEADER.len()
+            FRENCH_HEADER_LABELS.len()
         );
+        // Recovering names by position is only sound while the positions hold; a rename or
+        // a reorder that keeps twelve columns would otherwise read every amount off the
+        // running-balance `Solde`, rewriting the figures instead of failing.
+        for (index, (found, expected)) in names.iter().zip(FRENCH_HEADER_LABELS).enumerate() {
+            ensure!(
+                found == expected,
+                "French export column {index} is {found:?}, expected {expected:?}"
+            );
+        }
         names = FRENCH_HEADER.iter().map(|name| name.to_string()).collect();
     }
 
@@ -221,6 +263,8 @@ fn extract_transactions(content: &str) -> Result<Vec<Transaction>> {
     let account_label = column("accountLabel");
     let account_balance = column("accountbalance");
 
+    let date_shape = Regex::new(r"^\d{4}-\d{2}-\d{2}$").expect("valid regex");
+
     records
         .into_iter()
         .map(|record| {
@@ -230,8 +274,15 @@ fn extract_transactions(content: &str) -> Result<Vec<Transaction>> {
                     .unwrap_or_default()
                     .to_string()
             };
+            // Last line of defence against a reordering that keeps the header intact:
+            // unlike the amount, a date read off the wrong column still parses as text.
+            let operation_date = field(Some(date_op));
+            ensure!(
+                date_shape.is_match(&operation_date),
+                "export column {date_op} holds {operation_date:?}, not a YYYY-MM-DD date"
+            );
             Ok(Transaction {
-                date_op: field(Some(date_op)),
+                date_op: operation_date,
                 date_val: field(date_val),
                 label: field(Some(label)),
                 category: field(category),
@@ -464,22 +515,63 @@ mod tests {
         assert!(extract_transactions(csv).is_err());
     }
 
-    /// BoursoBank answers an empty range with the search page, not an empty CSV.
+    /// BoursoBank answers an empty range with the export form, not an empty CSV.
     #[test]
     fn test_extract_transactions_empty_range_is_not_an_error() {
         let html = format!(
-            "<!DOCTYPE html><html><body>{}  vos filtres de recherche.</body></html>",
-            NO_MOVEMENTS_MARKER
+            r#"<!DOCTYPE html><html><body><form name="movementSearch">{NO_MOVEMENTS_MARKER} vos filtres de recherche.</form></body></html>"#
         );
         assert!(extract_transactions(&html).unwrap().is_empty());
     }
 
     /// Any other page (an expired session bouncing us to login) must not read as "no
-    /// transactions" — that camouflage is what hid a broken export for so long.
+    /// transactions" — that camouflage is what hid a broken export for so long. Half a
+    /// signal is not the signal: the form alone, or the notice alone, is still an error.
     #[test]
     fn test_extract_transactions_rejects_unexpected_html() {
-        let html = "<!DOCTYPE html><html><body>Identifiez-vous</body></html>";
-        assert!(extract_transactions(html).is_err());
+        for html in [
+            "<!DOCTYPE html><html><body>Identifiez-vous</body></html>",
+            r#"<!DOCTYPE html><html><body><form name="movementSearch"></form></body></html>"#,
+            &format!("<!DOCTYPE html><html><body>{NO_MOVEMENTS_MARKER}</body></html>"),
+        ] {
+            assert!(extract_transactions(html).is_err(), "accepted {html:?}");
+        }
+    }
+
+    /// Renaming or reordering a column while keeping twelve of them would otherwise read
+    /// every amount off the running balance, which parses fine and is silently wrong.
+    #[test]
+    fn test_extract_transactions_rejects_relabelled_french_header() {
+        let reordered = TRANSACTIONS_CSV_FRENCH.replacen("Catégorie", "Genre", 1);
+        assert!(extract_transactions(&reordered).is_err());
+    }
+
+    /// A reordering that survives the header check still lands a non-date in `dateOp`.
+    #[test]
+    fn test_extract_transactions_rejects_non_date_operation_date() {
+        let csv = "dateOp;label;amount\nBoursoBank;VIR;21,81\n";
+        assert!(extract_transactions(csv).is_err());
+    }
+
+    /// An empty token is accepted by the form page and only rejected two requests later,
+    /// where nothing points back at its cause.
+    #[test]
+    fn test_extract_export_token() {
+        // Attribute order and spacing as BoursoBank serves them.
+        let page = |value: &str| {
+            format!(
+                r#"<form name="movementSearch" method="post" action="/budget/exporter-mouvements">
+<input  id="movementSearch_label" type="hidden" class="c-field__input" name="movementSearch[label]" value="" >
+<input  id="movementSearch__token" type="hidden" class="c-field__input" data-brs-text-input="data-brs-text-input" name="movementSearch[_token]" value="{value}" >
+</form>"#
+            )
+        };
+        assert_eq!(
+            extract_export_token(&page("99199c2ad85d9967e8c47268.d1pzVODy5BevlLw")).unwrap(),
+            "99199c2ad85d9967e8c47268.d1pzVODy5BevlLw"
+        );
+        assert!(extract_export_token(&page("")).is_err());
+        assert!(extract_export_token("<html><body>no form</body></html>").is_err());
     }
 
     #[test]
