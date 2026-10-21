@@ -1,7 +1,7 @@
 #[cfg(not(tarpaulin_include))]
 use crate::account::{Account, AccountKind};
-use crate::{client::transfer::error::TransferError, client::BoursoWebClient, constants::BASE_URL};
-use anyhow::{bail, Context, Result};
+use crate::{client::BoursoWebClient, client::transfer::error::TransferError, constants::BASE_URL};
+use anyhow::{Context, Result, bail};
 use futures_util::stream::Stream;
 use tracing::debug;
 

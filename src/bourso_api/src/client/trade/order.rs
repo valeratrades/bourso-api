@@ -8,7 +8,7 @@ use crate::{
     client::config::Config,
 };
 
-use super::{get_trading_base_url, BoursoWebClient};
+use super::{BoursoWebClient, get_trading_base_url};
 
 impl BoursoWebClient {
     /// Place an order
@@ -263,14 +263,12 @@ fn get_order_url(config: &Config) -> Result<String> {
 }
 
 fn get_order_prepare_url(config: &Config, account: &Account, symbol: &str) -> Result<String> {
-    Ok(
-        format!(
-            "{}/prepare?_host=tradingboard.boursobank.com&searchExtendedHours=false&selectedAccount={}&symbol={}",
-            get_order_url(config)?,
-            account.id,
-            symbol
-        )
-    )
+    Ok(format!(
+        "{}/prepare?_host=tradingboard.boursobank.com&searchExtendedHours=false&selectedAccount={}&symbol={}",
+        get_order_url(config)?,
+        account.id,
+        symbol
+    ))
 }
 
 fn get_order_check_url(config: &Config) -> Result<String> {

@@ -1,33 +1,32 @@
-use serde::{Serialize, Deserialize};
 use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
 
 use crate::client::BoursoWebClient;
 
 impl BoursoWebClient {
-
     /// Get the ticks for a given symbol, length and period
-    /// 
+    ///
     /// Ticks are quotes for a given symbol, period (time period interval) and length (the time frame)
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `symbol` - The symbol id of the stock (e.g: '1rTCW8')
     /// * `length` - The length period of the stock (e.g: '30' for 30 days)
     /// * `period` - The interval of the stock (e.g: '0' for default interval)
-    /// 
+    ///
     /// # Returns
-    /// 
+    ///
     /// A struct containing the quotes for the given symbol, period and length
     #[cfg(not(tarpaulin_include))]
     pub async fn get_ticks(&self, symbol: &str, length: i64, period: i64) -> Result<GetTicksEOD> {
         let url = format!(
             "https://www.boursorama.com/bourse/action/graph/ws/GetTicksEOD?symbol={}&length={}&period={}&guid=",
-            symbol,
-            length,
-            period
+            symbol, length, period
         );
 
-        let response = self.client.get(&url)
+        let response = self
+            .client
+            .get(&url)
             .header("Content-Type", "application/json;charset=UTF-8")
             .send()
             .await?;
@@ -37,11 +36,15 @@ impl BoursoWebClient {
         let response = response.text().await?;
 
         if status_code != 200 {
-            return Err(anyhow::anyhow!("Failed to get ticks response ({}): {}", status_code, response));
+            return Err(anyhow::anyhow!(
+                "Failed to get ticks response ({}): {}",
+                status_code,
+                response
+            ));
         }
-        
-        let response: GetTicksEOD = serde_json::from_str(&response)
-            .context("Failed to parse get ticks response")?;
+
+        let response: GetTicksEOD =
+            serde_json::from_str(&response).context("Failed to parse get ticks response")?;
 
         Ok(response)
     }
@@ -89,12 +92,18 @@ impl D {
 
     /// Get the highest value of the quotes for the given period and length
     pub fn get_highest_value(&self) -> f64 {
-        self.quote_tab.iter().map(|quote| quote.high).fold(0.0, f64::max)
+        self.quote_tab
+            .iter()
+            .map(|quote| quote.high)
+            .fold(0.0, f64::max)
     }
 
     /// Get the lowest value of the quotes for the given period and length
     pub fn get_lowest_value(&self) -> f64 {
-        self.quote_tab.iter().map(|quote| quote.low).fold(f64::MAX, f64::min)
+        self.quote_tab
+            .iter()
+            .map(|quote| quote.low)
+            .fold(f64::MAX, f64::min)
     }
 
     /// Get the average value of the quotes on closing for the given period and length

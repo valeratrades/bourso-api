@@ -31,7 +31,10 @@ impl fmt::Display for TransferError {
             TransferError::SetAmountFailed => write!(f, "Setting transfer amount failed"),
             TransferError::SetReasonFailed => write!(f, "Setting transfer reason failed"),
             TransferError::SubmitTransferFailed => write!(f, "Submitting transfer failed"),
-            TransferError::InvalidTransfer => write!(f, "Invalid transfer. Check that the accounts exist and that you have enough balance. Some accounts (e.g. savings) may not allow transfers to certain other accounts, check first on the website that the transfer is possible."),
+            TransferError::InvalidTransfer => write!(
+                f,
+                "Invalid transfer. Check that the accounts exist and that you have enough balance. Some accounts (e.g. savings) may not allow transfers to certain other accounts, check first on the website that the transfer is possible."
+            ),
         }
     }
 }

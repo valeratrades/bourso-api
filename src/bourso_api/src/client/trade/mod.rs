@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::account::{Account, AccountKind};
 
-use super::{config::Config, BoursoWebClient};
+use super::{BoursoWebClient, config::Config};
 
 impl BoursoWebClient {
     pub async fn trade() {}
@@ -52,13 +52,11 @@ fn get_trading_summary_url(config: &Config, account: Account) -> Result<String> 
         return Err(anyhow::anyhow!("Account is not a trading account"));
     }
 
-    Ok(
-        format!(
-            "{}/accounts/summary/{}?_host=tradingboard.boursobank.com&position=ACCOUNTING&responseFormat=true",
-            get_trading_base_url(config)?,
-            account.id
-        )
-    )
+    Ok(format!(
+        "{}/accounts/summary/{}?_host=tradingboard.boursobank.com&position=ACCOUNTING&responseFormat=true",
+        get_trading_base_url(config)?,
+        account.id
+    ))
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]

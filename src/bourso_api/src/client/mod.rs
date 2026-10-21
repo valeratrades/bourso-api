@@ -9,15 +9,15 @@ pub mod virtual_pad;
 use core::fmt;
 use std::sync::Arc;
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail, ensure};
 use cookie_store::Cookie;
 use error::ClientError;
 use regex::Regex;
 use reqwest_cookie_store::{CookieStore, CookieStoreMutex};
 use serde::{Deserialize, Serialize};
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
-use self::config::{extract_brs_config, Config};
+use self::config::{Config, extract_brs_config};
 
 use super::constants::BASE_URL;
 
@@ -430,13 +430,19 @@ impl BoursoWebClient {
         let payload = serde_json::json!({
             "formState": form_state
         });
-        let res = self
+        let request = self
             .client
             .post(url)
             .body(payload.to_string())
-            .header("Content-Type", "application/json; charset=utf-8")
-            .send()
-            .await?;
+            .header("Content-Type", "application/json; charset=utf-8");
+        // A poll can land on a pooled connection the server has already closed; the check is safe to repeat.
+        let res = match request.try_clone().expect("string body").send().await {
+            Err(e) if e.is_request() => {
+                warn!("MFA status check dropped ({e}), retrying on a fresh connection");
+                request.send().await?
+            }
+            res => res?,
+        };
 
         let status_code = res.status();
 
@@ -447,6 +453,7 @@ impl BoursoWebClient {
         }
 
         let body = res.text().await?;
+        debug!("MFA status response: {}", body);
         let json_body: serde_json::Value = serde_json::from_str(&body)?;
 
         if json_body["success"].as_bool().unwrap() {
@@ -521,6 +528,10 @@ impl BoursoWebClient {
                 ));
             }
 
+            ensure!(
+                json_body == serde_json::json!({ "success": false }),
+                "MFA check returned something other than pending: {body}"
+            );
             Ok(false)
         }
     }
@@ -584,8 +595,8 @@ fn extract_otp_params(res: &str) -> Result<(String, String)> {
             })
         })?;
 
-    let params = &challenge_json["challenges"][0]["parameters"]["formScreen"]["actions"]["check"]
-        ["api"]["params"];
+    let params = &challenge_json["challenges"][0]["parameters"]["formScreen"]["actions"]["check"]["api"]
+        ["params"];
 
     Ok((
         params["resourceId"]

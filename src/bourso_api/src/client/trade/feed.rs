@@ -1,4 +1,4 @@
-use crate::client::{config::Config, BoursoWebClient};
+use crate::client::{BoursoWebClient, config::Config};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 

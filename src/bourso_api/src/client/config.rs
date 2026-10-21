@@ -1,6 +1,6 @@
+use anyhow::{Context, Result};
 use regex::Regex;
-use serde::{Serialize, Deserialize};
-use anyhow::{Result, Context};
+use serde::{Deserialize, Serialize};
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -74,14 +74,14 @@ pub struct Webauth {
 
 pub fn extract_brs_config(res: &str) -> Result<Config> {
     let regex = Regex::new(r#"(?ms)window\.BRS_CONFIG\s*=\s*(?P<config>.*?);"#).unwrap();
-    let config = regex
-        .captures(&res)
-        .unwrap()
-        .name("config")
-        .unwrap();
+    let config = regex.captures(&res).unwrap().name("config").unwrap();
 
-    let config: Config = serde_json::from_str(&config.as_str().trim())
-        .with_context(|| format!("Could not deserialize BRS_CONFIG: {}", config.as_str().trim()))?;
+    let config: Config = serde_json::from_str(&config.as_str().trim()).with_context(|| {
+        format!(
+            "Could not deserialize BRS_CONFIG: {}",
+            config.as_str().trim()
+        )
+    })?;
 
     Ok(config)
 }
@@ -99,16 +99,31 @@ mod tests {
     #[test]
     fn test_extract_brs_config() {
         let config = super::extract_brs_config(SCRIPT_CONFIG).unwrap();
-        assert_eq!(config.jwt_token_id, "brsxds_61d55b52615fbdfb898a3731bba89b35");
+        assert_eq!(
+            config.jwt_token_id,
+            "brsxds_61d55b52615fbdfb898a3731bba89b35"
+        );
         assert_eq!(config.api_path, "/services/api/v1.7");
         assert_eq!(config.api_host, "api.boursobank.com");
-        assert_eq!(config.api_url, "https://api.boursobank.com/services/api/v1.7");
+        assert_eq!(
+            config.api_url,
+            "https://api.boursobank.com/services/api/v1.7"
+        );
         assert_eq!(config.api_env, "prod");
-        assert_eq!(config.api_referer_feature_id, "customer.dashboard_home.web_fr_front_20");
+        assert_eq!(
+            config.api_referer_feature_id,
+            "customer.dashboard_home.web_fr_front_20"
+        );
         assert_eq!(config.locale, "fr-FR");
         assert_eq!(config.subscription_host, "souscrire.boursobank.com");
-        assert_eq!(config.customer_subscription_host, "souscrire.boursobank.com");
-        assert_eq!(config.prospect_subscription_host, "ouvrir-un-compte.boursobank.com");
+        assert_eq!(
+            config.customer_subscription_host,
+            "souscrire.boursobank.com"
+        );
+        assert_eq!(
+            config.prospect_subscription_host,
+            "ouvrir-un-compte.boursobank.com"
+        );
         assert_eq!(config.debug, false);
         assert_eq!(config.enable_profiler, false);
         assert_eq!(config.authentication_endpoint, "/connexion/");
@@ -122,8 +137,17 @@ mod tests {
         assert_eq!(config.user_hash.unwrap(), "61d55b52615fbdf");
         assert_eq!(config.application_name, "web_fr_front_20");
         assert_eq!(config.marketing_name, "BoursoBank");
-        assert_eq!(config.webauth.prepare_path, "/webauthn/authentification/preparation");
-        assert_eq!(config.webauth.valid_path, "/webauthn/authentification/validation");
-        assert_eq!(config.default_api_bearer, "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpc3MiOiJPbmxpbmUgSldUIEJ1aWxkZXIiLCJpYXQiOjE2OTgyNDU5MTksImV4cCI6MTcyOTc4MTkxOSwiYXVkIjoid3d3LmV4YW1wbGUuY29tIiwic3ViIjoianJvY2tldEBleGFtcGxlLmNvbSIsIkdpdmVuTmFtZSI6IkpvaG5ueSIsIlN1cm5hbWUiOiJSb2NrZXQiLCJFbWFpbCI6Impyb2NrZXRAZXhhbXBsZS5jb20iLCJSb2xlIjpbIk1hbmFnZXIiLCJQcm9qZWN0IEFkbWluaXN0cmF0b3IiXX0.bvXls6bqw_xGqA6V8DQMsZK92dMrV8K6hebWpEu5IF8MlEd4qmwmcchJBUT7oeBnSIp5TJHH5112ho548Sw57A");
+        assert_eq!(
+            config.webauth.prepare_path,
+            "/webauthn/authentification/preparation"
+        );
+        assert_eq!(
+            config.webauth.valid_path,
+            "/webauthn/authentification/validation"
+        );
+        assert_eq!(
+            config.default_api_bearer,
+            "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9.eyJpc3MiOiJPbmxpbmUgSldUIEJ1aWxkZXIiLCJpYXQiOjE2OTgyNDU5MTksImV4cCI6MTcyOTc4MTkxOSwiYXVkIjoid3d3LmV4YW1wbGUuY29tIiwic3ViIjoianJvY2tldEBleGFtcGxlLmNvbSIsIkdpdmVuTmFtZSI6IkpvaG5ueSIsIlN1cm5hbWUiOiJSb2NrZXQiLCJFbWFpbCI6Impyb2NrZXRAZXhhbXBsZS5jb20iLCJSb2xlIjpbIk1hbmFnZXIiLCJQcm9qZWN0IEFkbWluaXN0cmF0b3IiXX0.bvXls6bqw_xGqA6V8DQMsZK92dMrV8K6hebWpEu5IF8MlEd4qmwmcchJBUT7oeBnSIp5TJHH5112ho548Sw57A"
+        );
     }
 }

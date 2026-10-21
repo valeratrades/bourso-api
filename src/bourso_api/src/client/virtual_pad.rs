@@ -1,6 +1,6 @@
-use std::collections::HashMap;
-use anyhow::{Result, Context};
+use anyhow::{Context, Result};
 use regex::Regex;
+use std::collections::HashMap;
 
 lazy_static::lazy_static! {
     static ref SVGS: HashMap<u8, &'static str> = {
@@ -15,16 +15,16 @@ lazy_static::lazy_static! {
         svgs.insert(7, "data:image/svg+xml;base64, PHN2ZyBlbmFibGUtYmFja2dyb3VuZD0ibmV3IDAgMCA0MiA0MiIgdmlld0JveD0iMCAwIDQyIDQyIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPjxnIGZpbGw9IiMwMDM4ODMiPjxnIGVuYWJsZS1iYWNrZ3JvdW5kPSJuZXciPjxwYXRoIGQ9Im01IDMwLjRoMi45YzEuNCAwIDIuMiAxIDIuMiAyLjJzLS44IDIuMi0yLjIgMi4yaC0ydjIuOWgtLjl6bTIuOC44aC0xLjl2Mi44aDEuOWMuOSAwIDEuNC0uNiAxLjQtMS40cy0uNS0xLjQtMS40LTEuNHoiLz48cGF0aCBkPSJtMTkuMyAzNi43LjcuNy0uNi41LS43LS43Yy0uNS4zLTEuMi41LTEuOS41LTIuMSAwLTMuNi0xLjYtMy42LTMuN3MxLjQtMy43IDMuNi0zLjdjMi4xIDAgMy42IDEuNiAzLjYgMy43LS4xIDEuMS0uNCAyLTEuMSAyLjd6bS0xLjItLjEtMS0xLjEuNi0uNSAxIDEuMWMuNC0uNS43LTEuMi43LTIgMC0xLjctMS0yLjktMi42LTIuOXMtMi42IDEuMi0yLjYgMi45IDEgMi45IDIuNiAyLjljLjUtLjEuOS0uMiAxLjMtLjR6Ii8+PHBhdGggZD0ibTI2LjIgMzQuOGgtMS40djIuOWgtLjl2LTcuMmgyLjljMS4zIDAgMi4yLjggMi4yIDIuMiAwIDEuMy0uOSAyLTEuOSAyLjFsMS45IDIuOWgtMXptLjQtMy42aC0xLjl2Mi44aDEuOWMuOCAwIDEuNC0uNiAxLjQtMS40LjEtLjgtLjUtMS40LTEuNC0xLjR6Ii8+PHBhdGggZD0ibTMyLjcgMzUuOWMuNS41IDEuMiAxIDIuMyAxIDEuMyAwIDEuNy0uNyAxLjctMS4yIDAtLjktLjktMS4xLTEuOC0xLjQtMS4yLS4zLTIuNC0uNi0yLjQtMiAwLTEuMiAxLjEtMiAyLjUtMiAxLjEgMCAxLjkuNCAyLjUgMWwtLjcuN2MtLjUtLjYtMS4zLS45LTIuMS0uOS0uOSAwLTEuNS41LTEuNSAxLjEgMCAuNy44LjkgMS43IDEuMiAxLjIuMyAyLjUuNyAyLjUgMi4yIDAgMS0uNyAyLjEtMi42IDIuMS0xLjIgMC0yLjItLjUtMi44LTEuMXoiLz48L2c+PHBhdGggZD0ibTI0LjkgNy42aC05LjV2LTEuM2gxMS4zdjFsLTcuNCAxNi4yaC0xLjZ6Ii8+PC9nPjwvc3ZnPg==");
         svgs.insert(8, "data:image/svg+xml;base64, PHN2ZyBlbmFibGUtYmFja2dyb3VuZD0ibmV3IDAgMCA0MiA0MiIgdmlld0JveD0iMCAwIDQyIDQyIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPjxnIGZpbGw9IiMwMDM4ODMiPjxnIGVuYWJsZS1iYWNrZ3JvdW5kPSJuZXciPjxwYXRoIGQ9Im0xMS44IDMxLjFoLTIuM3YtLjhoNS40di44aC0yLjN2Ni40aC0uOXYtNi40eiIvPjxwYXRoIGQ9Im0xOC4zIDMwLjNoLjl2NC40YzAgMS4zLjcgMi4xIDIgMi4xczItLjggMi0yLjF2LTQuNGguOXY0LjRjMCAxLjgtMSAyLjktMi45IDIuOXMtMi45LTEuMi0yLjktMi45eiIvPjxwYXRoIGQ9Im0yNy4yIDMwLjNoMWwyLjQgNi4yIDIuNC02LjJoMWwtMi45IDcuMmgtMS4xeiIvPjwvZz48cGF0aCBkPSJtMjAuMyAxNC43Yy0yLS41LTQtMS45LTQtNC4yIDAtMy4xIDIuOC00LjUgNS42LTQuNSAyLjcgMCA1LjYgMS40IDUuNiA0LjUgMCAyLjMtMiAzLjYtNCA0LjIgMi4yLjYgNC4zIDIuMiA0LjMgNC42IDAgMi44LTIuNSA0LjYtNS44IDQuNnMtNS45LTEuOC01LjktNC42Yy0uMS0yLjUgMi00LjEgNC4yLTQuNnptMS42LjZjLTEuMS4xLTQuNCAxLjItNC40IDMuOCAwIDIuMSAyLjEgMy40IDQuNCAzLjRzNC40LTEuMyA0LjQtMy40YzAtMi42LTMuNC0zLjYtNC40LTMuOHptMC03LjljLTIuMyAwLTQuMSAxLjItNC4xIDMuMyAwIDIuNCAzLjEgMy4yIDQuMSAzLjQgMS4xLS4yIDQuMS0xIDQuMS0zLjQgMC0yLjEtMS44LTMuMy00LjEtMy4zeiIvPjwvZz48L3N2Zz4=");
         svgs.insert(9, "data:image/svg+xml;base64, PHN2ZyBlbmFibGUtYmFja2dyb3VuZD0ibmV3IDAgMCA0MiA0MiIgdmlld0JveD0iMCAwIDQyIDQyIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPjxnIGZpbGw9IiMwMDM4ODMiPjxnIGVuYWJsZS1iYWNrZ3JvdW5kPSJuZXciPjxwYXRoIGQ9Im03LjYgMzEuNy0xLjYgNS44aC0xbC0yLTcuMmgxbDEuNiA2IDEuNi02aC44bDEuNiA2IDEuNi02aDFsLTIgNy4yaC0xeiIvPjxwYXRoIGQ9Im0xOCAzNC40LTIuMyAzLjFoLTEuMWwyLjgtMy43LTIuNi0zLjVoMS4xbDIuMSAyLjkgMi4xLTIuOWgxLjFsLTIuNiAzLjUgMi44IDMuN2gtMS4xeiIvPjxwYXRoIGQ9Im0yNi42IDM0LjUtMi44LTQuMWgxbDIuMiAzLjMgMi4yLTMuM2gxbC0yLjggNC4xdjNoLS45di0zeiIvPjxwYXRoIGQ9Im0zMy4xIDM2LjggNC01LjZoLTR2LS44aDUuMnYuN2wtNCA1LjZoNC4xdi44aC01LjJ2LS43eiIvPjwvZz48cGF0aCBkPSJtMTcuNyAyMC42Yy44IDEuMSAxLjkgMS45IDMuOCAxLjkgMy44IDAgNS4xLTQgNS4xLTcuNnYtLjhjLS44IDEuMi0yLjcgMi45LTUuMSAyLjktMy4xIDAtNS42LTEuOC01LjYtNS41LjEtMi44IDIuMi01LjUgNS45LTUuNSA0LjcgMCA2LjMgNC4zIDYuMyA4LjkgMCA0LjQtMS44IDguOS02LjYgOC45LTIuMyAwLTMuNi0uOS00LjYtMi4yem00LjEtMTMuMmMtMyAwLTQuMyAyLjMtNC4zIDQuMSAwIDIuOCAxLjkgNC4yIDQuMyA0LjIgMS45IDAgMy43LTEuMiA0LjctMy0uMi0yLjMtMS40LTUuMy00LjctNS4zeiIvPjwvZz48L3N2Zz4=");
-    
+
         svgs
     };
 }
 
 /// Get the number associated to the svg
-/// 
+///
 /// # Arguments
 /// - `svg` - the svg to get the number for
-/// 
+///
 /// # Returns
 /// The number associated to the svg or None if not found
 pub fn get_number_for_svg(svg: &str) -> Option<u8> {
@@ -37,20 +37,24 @@ pub fn get_number_for_svg(svg: &str) -> Option<u8> {
 }
 
 /// Translate a password to virtual pad keys.
-/// 
+///
 /// It matches each character of the password to a virtual pad key.
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `password` - The password to translate.
-/// 
+///
 /// # Returns
-/// 
+///
 /// The virtual pad keys as an array of strings.
-pub fn password_to_virtual_pad_keys(virtual_pad_ids: Vec<String>, password: &str) -> Result<Vec<String>> {
+pub fn password_to_virtual_pad_keys(
+    virtual_pad_ids: Vec<String>,
+    password: &str,
+) -> Result<Vec<String>> {
     let mut keys: Vec<String> = Vec::new();
     for c in password.chars() {
-        let number = c.to_digit(10)
+        let number = c
+            .to_digit(10)
             .with_context(|| format!("Invalid character in password: {}", c))?;
         keys.push(virtual_pad_ids[number as usize].clone());
     }
@@ -58,15 +62,14 @@ pub fn password_to_virtual_pad_keys(virtual_pad_ids: Vec<String>, password: &str
     Ok(keys)
 }
 
-
 /// Extract the data matrix keys from a string, usually the response of the `/connexion/clavier-virtuel?_hinclude=1` page.
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `res` - The response of the `/connexion/clavier-virtuel?_hinclude=1` page as a string.
-/// 
+///
 /// # Returns
-/// 
+///
 /// The data matrix keys as an array of 10 strings.
 pub fn extract_data_matrix_keys(res: &str) -> Result<[&str; 10]> {
     let regex = Regex::new(r#"(?ms)<button.*?data-matrix-key="(?P<matrix_key>[A-Z]{3})".*?src="(?P<svg>data:image.*?)">.*?</button>"#).unwrap();
@@ -85,28 +88,26 @@ pub fn extract_data_matrix_keys(res: &str) -> Result<[&str; 10]> {
 }
 
 /// Extract the challenge token from a string, usually the response of the `/connexion/clavier-virtuel?_hinclude=1` page.
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `res` - The response of the `/connexion/clavier-virtuel?_hinclude=1` page as a string.
-/// 
+///
 /// # Returns
-/// 
+///
 /// The challenge token as a string.
 pub fn extract_challenge_token(res: &str) -> Result<String> {
-    let regex = Regex::new(r#"(?m)data-matrix-random-challenge\]"\)\.val\("(?P<challenge_id>.*?)"\)"#).unwrap();
-    let challenge_id = regex
-        .captures(&res)
-        .unwrap()
-        .name("challenge_id")
-        .unwrap();
+    let regex =
+        Regex::new(r#"(?m)data-matrix-random-challenge\]"\)\.val\("(?P<challenge_id>.*?)"\)"#)
+            .unwrap();
+    let challenge_id = regex.captures(&res).unwrap().name("challenge_id").unwrap();
 
     Ok(challenge_id.as_str().trim().to_string())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{extract_data_matrix_keys, password_to_virtual_pad_keys, extract_challenge_token};
+    use super::{extract_challenge_token, extract_data_matrix_keys, password_to_virtual_pad_keys};
     use crate::client::BoursoWebClient;
 
     #[test]
@@ -116,26 +117,30 @@ mod tests {
             .map(|key| key.to_string())
             .to_vec();
         let password_translated_to_keys = password_to_virtual_pad_keys(keys, "123654").unwrap();
-        assert_eq!(vec![
-            "UVQ",
-            "LGK",
-            "TLT",
-            "ANP",
-            "RNI",
-            "ISV", 
-        ], password_translated_to_keys);
+        assert_eq!(
+            vec!["UVQ", "LGK", "TLT", "ANP", "RNI", "ISV",],
+            password_translated_to_keys
+        );
     }
 
     #[test]
     fn test_extract_challenge_token() {
         let token = extract_challenge_token(VIRTUAL_PAD_RES).unwrap();
-        assert_eq!(token, "THIS-STRING_represents0the1random__ElXSl-qJoXCKnqTBiew");
+        assert_eq!(
+            token,
+            "THIS-STRING_represents0the1random__ElXSl-qJoXCKnqTBiew"
+        );
     }
 
     #[test]
     fn test_extract_data_matrix_keys() {
         let keys = extract_data_matrix_keys(VIRTUAL_PAD_RES).unwrap();
-        assert_eq!(keys, ["WZE", "UVQ", "LGK", "TLT", "ISV", "RNI", "ANP", "UCA", "FIG", "YCL"]);
+        assert_eq!(
+            keys,
+            [
+                "WZE", "UVQ", "LGK", "TLT", "ISV", "RNI", "ANP", "UCA", "FIG", "YCL"
+            ]
+        );
     }
 
     const VIRTUAL_PAD_RES: &str = r#"<div class="login-matrix">

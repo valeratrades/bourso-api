@@ -186,8 +186,8 @@ pub async fn parse_matches(matches: ArgMatches) -> Result<()> {
                         return Err(e);
                     }
                 };
-                info!(
-                    "To validate your identity, please open the BoursoBank app and validate the login request."
+                warn!(
+                    "Approve the login request in the BoursoBank app on your phone. Waiting up to 5 minutes."
                 );
 
                 // Loop until MFA is ready, timeout after 5 minutes
@@ -195,7 +195,7 @@ pub async fn parse_matches(matches: ArgMatches) -> Result<()> {
                 let wait_interval = 5;
                 let max_wait_time = 300;
                 loop {
-                    info!(
+                    debug!(
                         "Checking MFA status... (waited {}s/{})",
                         wait_time, max_wait_time
                     );
