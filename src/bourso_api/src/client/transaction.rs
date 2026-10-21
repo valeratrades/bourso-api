@@ -139,19 +139,53 @@ const FRENCH_HEADER: [&str; 12] = [
     "mark",
 ];
 
+const FRENCH_HEADER_LABELS_WITH_TAGS: [&str; 13] = [
+    "Date Opération",
+    "Date Valeur",
+    "Libellé",
+    "Tags",
+    "Libellé Suggéré",
+    "Catégorie",
+    "Catégorie Parente",
+    "Solde",
+    "Commentaire",
+    "Numéro Compte",
+    "Libellé Compte",
+    "Solde",
+    "Pointage",
+];
+
+const FRENCH_HEADER_WITH_TAGS: [&str; 13] = [
+    "dateOp",
+    "dateVal",
+    "label",
+    "tags",
+    "suggestedLabel",
+    "category",
+    "categoryParent",
+    "amount",
+    "comment",
+    "accountNum",
+    "accountLabel",
+    "accountbalance",
+    "mark",
+];
+
 /// Scrape the per-session CSRF token out of the export form page.
 ///
 /// The closing quote after `]` keeps this anchored on the attribute name rather than any
 /// input whose name merely starts with it, and an empty token is refused here rather than
 /// two requests later, where the rejection says nothing about its cause.
 fn extract_export_token(page: &str) -> Result<String> {
-    Ok(Regex::new(r#"movementSearch\[_token\]"[^>]*?value="(?P<token>[^"]+)""#)
-        .expect("valid regex")
-        .captures(page)
-        .and_then(|c| c.name("token"))
-        .context("Could not find a non-empty export form CSRF token")?
-        .as_str()
-        .to_string())
+    Ok(
+        Regex::new(r#"movementSearch\[_token\]"[^>]*?value="(?P<token>[^"]+)""#)
+            .expect("valid regex")
+            .captures(page)
+            .and_then(|c| c.name("token"))
+            .context("Could not find a non-empty export form CSRF token")?
+            .as_str()
+            .to_string(),
+    )
 }
 
 /// Parse a French-formatted amount string to f64.
@@ -208,24 +242,41 @@ fn extract_transactions(content: &str) -> Result<Vec<Transaction>> {
         .headers()
         .context("Export has no CSV header")?
         .clone();
-    let mut names: Vec<String> = headers.iter().map(|header| header.trim().to_string()).collect();
-    if names.first().is_some_and(|first| first == FRENCH_HEADER_LABELS[0]) {
+    let mut names: Vec<String> = headers
+        .iter()
+        .map(|header| header.trim().to_string())
+        .collect();
+    if names
+        .first()
+        .is_some_and(|first| first == FRENCH_HEADER_LABELS[0])
+    {
         ensure!(
-            names.len() == FRENCH_HEADER_LABELS.len(),
-            "French export header carries {} columns, expected {}",
+            matches!(names.len(), 12 | 13),
+            "French export header carries {} columns, expected 12 or 13",
             names.len(),
-            FRENCH_HEADER_LABELS.len()
         );
         // Recovering names by position is only sound while the positions hold; a rename or
         // a reorder that keeps twelve columns would otherwise read every amount off the
         // running-balance `Solde`, rewriting the figures instead of failing.
-        for (index, (found, expected)) in names.iter().zip(FRENCH_HEADER_LABELS).enumerate() {
+        let expected = if names.len() == 12 {
+            &FRENCH_HEADER_LABELS[..]
+        } else {
+            &FRENCH_HEADER_LABELS_WITH_TAGS[..]
+        };
+        for (index, (found, expected)) in names.iter().zip(expected).enumerate() {
             ensure!(
                 found == expected,
                 "French export column {index} is {found:?}, expected {expected:?}"
             );
         }
-        names = FRENCH_HEADER.iter().map(|name| name.to_string()).collect();
+        names = if names.len() == 12 {
+            FRENCH_HEADER.iter().map(|name| name.to_string()).collect()
+        } else {
+            FRENCH_HEADER_WITH_TAGS
+                .iter()
+                .map(|name| name.to_string())
+                .collect()
+        };
     }
 
     let records = reader
@@ -499,6 +550,34 @@ mod tests {
         assert_eq!(french[0].account_balance, 0.05);
         assert_eq!(french[1].supplier_found, "Cloudflare");
         assert_eq!(french[2].category, "Alimentation");
+    }
+
+    #[test]
+    fn test_extract_transactions_french_header_with_tags() {
+        let tagged = TRANSACTIONS_CSV_FRENCH
+            .lines()
+            .enumerate()
+            .map(|(index, line)| {
+                if index == 0 {
+                    line.replacen("Libellé;", "Libellé;Tags;", 1)
+                } else {
+                    let mut fields = line.splitn(4, ';');
+                    format!(
+                        "{};{};{};;{}",
+                        fields.next().unwrap(),
+                        fields.next().unwrap(),
+                        fields.next().unwrap(),
+                        fields.next().unwrap(),
+                    )
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+            + "\n";
+        assert_eq!(
+            extract_transactions(&tagged).unwrap(),
+            extract_transactions(TRANSACTIONS_CSV_FRENCH).unwrap()
+        );
     }
 
     /// A row wider than the header by anything other than the unnamed `tags` field means
