@@ -1,6 +1,7 @@
 pub mod account;
 pub mod config;
 pub mod error;
+pub mod pending;
 pub mod trade;
 pub mod transaction;
 pub mod transfer;

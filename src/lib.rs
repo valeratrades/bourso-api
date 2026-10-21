@@ -3,6 +3,7 @@ use bourso_api::{
     account::{Account, AccountKind, Transaction},
     client::{
         BoursoWebClient,
+        pending::PendingTransaction,
         trade::{order::OrderSide, tick::QuoteTab},
         transaction::recurring,
         transfer::TransferProgress,
@@ -311,15 +312,35 @@ pub async fn parse_matches(matches: ArgMatches) -> Result<()> {
 
                 info!("Found {} transactions", transactions.len());
 
+                let pending: Option<Vec<PendingTransaction>> =
+                    match tx_matches.get_flag("include-pending") {
+                        true => {
+                            let pending = web_client.get_pending_transactions(account_id).await?;
+                            info!("Found {} pending transactions", pending.len());
+                            Some(pending)
+                        }
+                        false => None,
+                    };
+
                 let content = match format {
-                    "json" => serde_json::to_string_pretty(&transactions)?,
+                    "json" => match &pending {
+                        Some(pending) => serde_json::to_string_pretty(
+                            &serde_json::json!({ "transactions": transactions, "pending": pending }),
+                        )?,
+                        None => serde_json::to_string_pretty(&transactions)?,
+                    },
                     _ => {
-                        let mut lines = vec![
-                                "dateOp;dateVal;label;category;categoryParent;supplierFound;amount;comment;accountNum;accountLabel;accountbalance".to_string()
-                            ];
+                        let pending_column = |value: &str| match pending {
+                            Some(_) => format!(";{value}"),
+                            None => String::new(),
+                        };
+                        let mut lines = vec![format!(
+                            "dateOp;dateVal;label;category;categoryParent;supplierFound;amount;comment;accountNum;accountLabel;accountbalance{}",
+                            pending_column("pending")
+                        )];
                         for tx in &transactions {
                             lines.push(format!(
-                                "{};{};{};{};{};{};{};{};{};{};{}",
+                                "{};{};{};{};{};{};{};{};{};{};{}{}",
                                 tx.date_op,
                                 tx.date_val,
                                 tx.label,
@@ -331,6 +352,14 @@ pub async fn parse_matches(matches: ArgMatches) -> Result<()> {
                                 tx.account_num,
                                 tx.account_label,
                                 format!("{:.2}", tx.account_balance),
+                                pending_column("false"),
+                            ));
+                        }
+                        // not booked, so no category parent, supplier, account or running balance yet
+                        for tx in pending.iter().flatten() {
+                            lines.push(format!(
+                                "{0};{0};{1};{2};;;{3:.2};;;;;true",
+                                tx.date, tx.label, tx.category, tx.amount
                             ));
                         }
                         lines.join("\n")

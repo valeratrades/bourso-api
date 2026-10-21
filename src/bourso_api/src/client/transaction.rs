@@ -190,13 +190,13 @@ fn extract_export_token(page: &str) -> Result<String> {
 
 /// Parse a French-formatted amount string to f64.
 ///
-/// Handles thousands separators (spaces and non-breaking spaces) and
-/// comma decimal separators as used in BoursoBank CSV exports.
-fn parse_amount(s: &str) -> Result<f64> {
+/// Handles the thousands separators, comma decimals, euro sign and U+2212 minus that
+/// BoursoBank emits in its CSV exports and account pages.
+pub(super) fn parse_amount(s: &str) -> Result<f64> {
     let cleaned = s
         .trim()
-        .replace('\u{a0}', "")
-        .replace(' ', "")
+        .replace(['\u{a0}', '\u{202f}', ' ', '€'], "")
+        .replace('\u{2212}', "-")
         .replace(',', ".");
     cleaned
         .parse::<f64>()
@@ -503,6 +503,7 @@ mod tests {
         assert_eq!(parse_amount("1 718,70").unwrap(), 1718.70);
         assert_eq!(parse_amount("-8,99").unwrap(), -8.99);
         assert_eq!(parse_amount("37.29").unwrap(), 37.29);
+        assert_eq!(parse_amount("\u{2212}\u{202f}3,94\u{a0}€").unwrap(), -3.94);
         assert!(parse_amount("").is_err());
         assert!(parse_amount("n/a").is_err());
     }

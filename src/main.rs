@@ -2,7 +2,7 @@ use anyhow::Result;
 use bourso_api::client::trade::order::OrderSide;
 use bourso_cli::{settings::init_logger, validate::validate_account_id};
 use clap::{
-    Arg, Command,
+    Arg, ArgAction, Command,
     builder::{PossibleValue, ValueParser},
 };
 
@@ -202,6 +202,12 @@ async fn main() -> Result<()> {
                                 .short('o')
                                 .help("Output file path (defaults to stdout)")
                                 .required(false)
+                        )
+                        .arg(
+                            Arg::new("include-pending")
+                                .long("include-pending")
+                                .help("Also list card payments authorised but not booked yet, whatever the date range; CSV gains a `pending` column")
+                                .action(ArgAction::SetTrue)
                         )
                 )
                 .subcommand(
