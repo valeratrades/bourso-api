@@ -355,11 +355,11 @@ pub async fn parse_matches(matches: ArgMatches) -> Result<()> {
                                 pending_column("false"),
                             ));
                         }
-                        // not booked, so no category parent, supplier, account or running balance yet
+                        // not booked, so no category, supplier, account or running balance yet
                         for tx in pending.iter().flatten() {
                             lines.push(format!(
-                                "{0};{0};{1};{2};;;{3:.2};;;;;true",
-                                tx.date, tx.label, tx.category, tx.amount
+                                "{0};{0};{1};;;;{2:.2};;;;;true",
+                                tx.date, tx.label, tx.amount
                             ));
                         }
                         lines.join("\n")

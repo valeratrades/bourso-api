@@ -6,6 +6,7 @@ use anyhow::{Context, Result, bail, ensure};
 use chrono::NaiveDate;
 use regex::Regex;
 use serde::Serialize;
+use tracing::debug;
 
 /// A card payment BoursoBank has authorised but not booked yet. The CSV export never
 /// carries these; the account's movement list shows them ahead of the booked ones.
@@ -14,7 +15,6 @@ pub struct PendingTransaction {
     /// Authorisation date (YYYY-MM-DD)
     pub date: String,
     pub label: String,
-    pub category: String,
     /// Amount in EUR
     pub amount: f64,
 }
@@ -37,15 +37,13 @@ impl BoursoWebClient {
             .error_for_status()?
             .text()
             .await?;
-        extract_pending(&page)
+        extract_pending(&page).inspect_err(|_| debug!("Account movements page: {page}"))
     }
 }
 
-const AUTHORIZATION_MARKER: &str = "list-operation-item__label-name--authorization";
-
-/// Walk the movement list's `<li>`s: each date line dates the items under it, and an item
-/// carrying the authorization marker is pending. Every other `<li>` is ignored, so the
-/// slice an item owns runs to the next date line or item.
+/// Walk the movement list's `<li>`s: each date line dates the items under it, and every
+/// item says whether it is an authorization. Every other `<li>` is ignored, so the slice
+/// an item owns runs to the next date line or item.
 fn extract_pending(page: &str) -> Result<Vec<PendingTransaction>> {
     ensure!(
         page.contains("list__movement"),
@@ -67,6 +65,7 @@ fn extract_pending(page: &str) -> Result<Vec<PendingTransaction>> {
         })
         .collect();
 
+    let is_auth = Regex::new(r#"\bdata-is-auth="(true|false)""#).expect("valid regex");
     let mut date = None;
     let mut pending = Vec::new();
     for (i, &(start, is_date_line)) in starts.iter().enumerate() {
@@ -76,18 +75,22 @@ fn extract_pending(page: &str) -> Result<Vec<PendingTransaction>> {
             date = Some(parse_french_date(&text(slice))?);
             continue;
         }
-        if !slice.contains(AUTHORIZATION_MARKER) {
-            continue;
+        let open_tag = &slice[..slice.find('>').context("Unterminated movement <li>")?];
+        match is_auth
+            .captures(open_tag)
+            .map(|c| c.get(1).expect("group").as_str())
+        {
+            Some("true") => {}
+            Some(_) => continue,
+            None => bail!("Movement without data-is-auth; the account page markup changed"),
         }
         let date = date.context("Pending movement listed before any date line")?;
-        let label = element_text(slice, "list__movement--label-initial")
-            .or_else(|| element_text(slice, "list-operation-item__label-name"))
+        let label = element_text(slice, "list__movement--label-user")
             .context("Pending movement without a label")?;
         let amount = element_text(slice, "list-operation-item__amount")
             .with_context(|| format!("Pending movement {label:?} without an amount"))?;
         pending.push(PendingTransaction {
             date: date.format("%Y-%m-%d").to_string(),
-            category: element_text(slice, "list-operation-item__category").unwrap_or_default(), // the page leaves some movements uncategorised
             amount: parse_amount(&amount)?,
             label,
         });
@@ -158,29 +161,28 @@ fn parse_french_date(s: &str) -> Result<NaiveDate> {
 mod tests {
     use super::*;
 
-    /// Shaped after the selectors woob and boursocli scrape; booked items are skipped,
-    /// pending ones take the date line above them.
-    const PAGE: &str = r#"<ul class="list__movement">
-<li class="list-operation-date-line">mardi 20 octobre 2026</li>
-<li class="list-operation-item" data-id="">
-  <div class="list-operation-item__label">
-    <div class="list-operation-item__label-name list-operation-item__label-name--authorization">
-      <span class="list__movement--label-initial">CARTE 20/10/26 CLOUDFLARE CB*5287</span>
-    </div>
-    <span class="list-operation-item__category">Non catégorisé</span>
-  </div>
-  <div class="list-operation-item__amount">&minus;3,94&nbsp;€</div>
-</li>
-<li class="list-operation-item" data-id="">
-  <div class="list-operation-item__label-name list-operation-item__label-name--authorization">FAL.AI</div>
-  <div class="list-operation-item__amount">−12,50 €</div>
-</li>
-<li class="list-operation-date-line">20 octobre 2026</li>
-<li class="list-operation-item" data-id="abc">
-  <div class="list-operation-item__label-name">CARTE 19/10/26 LIDL 4147 CB*5287</div>
-  <div class="list-operation-item__amount">−27,41 €</div>
-</li>
-</ul>"#;
+    /// Trimmed from a live page: a booked item, then two pending ones under the day they
+    /// were authorised.
+    const PAGE: &str = r#"<ul class="list__movement" data-operations-list><li class="list-operation-date-line">mercredi 21 octobre 2026</li><li class="list-operation-item"
+        data-brs-detail-operation
+        data-id="6ad868c26296b730425a2273"
+        data-is-auth="false"
+        data-operations-item
+    ><div class="list-operation-item__block "><div class="list-operation-item__content"><div class="list-operation-item__label"><div class="list-operation-item__label-name"><span class="list__movement--label-user">VIR INST XPOLLENS IZLY</span></div></div><div class="list-operation-item__amount ">
+            − 5,00 €
+        </div></div></div></li><li class="list-operation-date-line">mardi 20 octobre 2026</li><li class="list-operation-item"
+        data-brs-detail-operation
+        data-tag-commander-click='pending_authorizations'
+        data-is-auth="true"
+        data-operations-item
+    ><div class="list-operation-item__block " ><div class="list-operation-item__content"><div class="list-operation-item__category-picto--authorization"><span class="c-icon--authorization2" style="color: #3d5d84"></span></div><div class="list-operation-item__label"><div class="list-operation-item__label-name--authorization"><span class="list__movement--label-user" data-operation-label-long>CLOUDFLARE 18889935273 US</span></div><div class="list-operation-item__label-sub"><span class="list-operation-item__category" title="Autorisation paiement en cours CB*5287">Autorisation paiement en cours CB*5287</span></div></div><div class="list-operation-item__amount  list-operation-item__amount--authorization  ">
+            − 4,03 €
+        </div><div class="list-operation-item__check"></div></div></div></li><li class="list-operation-item"
+        data-is-auth="true"
+        data-operations-item
+    ><div class="list-operation-item__block " ><div class="list-operation-item__content"><div class="list-operation-item__label"><div class="list-operation-item__label-name--authorization"><span class="list__movement--label-user" data-operation-label-long>ZENHUB 18449344313 CA</span></div></div><div class="list-operation-item__amount  list-operation-item__amount--authorization  ">
+            − 6,71 €
+        </div></div></div></li></ul>"#;
 
     #[test]
     fn test_extract_pending() {
@@ -189,26 +191,23 @@ mod tests {
             vec![
                 PendingTransaction {
                     date: "2026-10-20".to_string(),
-                    label: "CARTE 20/10/26 CLOUDFLARE CB*5287".to_string(),
-                    category: "Non catégorisé".to_string(),
-                    amount: -3.94,
+                    label: "CLOUDFLARE 18889935273 US".to_string(),
+                    amount: -4.03,
                 },
                 PendingTransaction {
                     date: "2026-10-20".to_string(),
-                    label: "FAL.AI".to_string(),
-                    category: String::new(),
-                    amount: -12.5,
+                    label: "ZENHUB 18449344313 CA".to_string(),
+                    amount: -6.71,
                 },
             ]
         );
     }
 
+    /// Losing the authorization flag would otherwise read as "nothing pending".
     #[test]
     fn test_extract_pending_rejects_unknown_markup() {
         assert!(extract_pending("<html><body>Connexion</body></html>").is_err());
-        assert!(
-            extract_pending(r#"<ul class="list__movement"><li class="list-operation-date-line">Aujourd'hui</li></ul>"#)
-                .is_err()
-        );
+        assert!(extract_pending(&PAGE.replace("data-is-auth", "data-auth")).is_err());
+        assert!(extract_pending(&PAGE.replace("mardi 20 octobre", "Hier")).is_err());
     }
 }
