@@ -12,7 +12,9 @@ jobs:
         with:
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
           name: valeratrades
+          skipPush: true
       - run: nix build -L '.#packages.${{ matrix.system }}.default'
+      - run: cachix push valeratrades ./result
     strategy:
       fail-fast: false
       matrix:
